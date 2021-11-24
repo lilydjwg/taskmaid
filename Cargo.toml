@@ -24,5 +24,9 @@ features = ["use_system_lib"]
 version = "*"
 features = ["client", "unstable_protocols"]
 
+[dependencies.tokio]
+version = "*"
+features = ["net", "rt"]
+
 [profile.release]
 lto = true

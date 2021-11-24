@@ -1,7 +1,8 @@
 use std::{rc::Rc, cell::{Cell, RefCell}};
 use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
 
-use wayland_client::{Display, GlobalManager, Main, global_filter};
+use wayland_client::{Display, EventQueue, GlobalManager, Main, global_filter};
 use wayland_client::protocol::wl_output;
 use wayland_protocols::unstable::xdg_output::v1::client::{
   zxdg_output_manager_v1,
@@ -15,6 +16,8 @@ use wayland_protocols::wlr::unstable::foreign_toplevel::v1::client::{
 use eyre::Result;
 use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
+
+use tokio::io::unix::AsyncFd;
 
 mod toplevel;
 mod event;
@@ -37,11 +40,36 @@ fn main() -> Result<()> {
     fmt.init();
   }
 
-  run();
+  let (finished, rx, event_queue) = setup();
+  let fu = run(finished, rx, event_queue);
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .unwrap();
+  rt.block_on(fu);
+
   Ok(())
 }
 
-fn run() {
+async fn run(
+  finished: Rc<Cell<bool>>,
+  rx: Receiver<event::Event>,
+  mut event_queue: EventQueue,
+) {
+  std::thread::spawn(move || {
+    topwoman::run(rx);
+  });
+  let afd = AsyncFd::new(event_queue.display().get_connection_fd()).unwrap();
+
+  while !finished.get() {
+    event_queue.sync_roundtrip(&mut (), |_, _, _| { /* we ignore unfiltered messages */ }).unwrap();
+    debug!("waiting to read from wayland server...");
+    let mut guard = afd.readable().await.unwrap();
+    guard.clear_ready();
+  }
+}
+
+fn setup() -> (Rc<Cell<bool>>, Receiver<event::Event>, EventQueue) {
   let display = Display::connect_to_env().unwrap();
   let mut event_queue = display.create_event_queue();
   let attached_display = (*display).clone().attach(event_queue.token());
@@ -129,11 +157,5 @@ fn run() {
     _ => unreachable!(),
   });
 
-  std::thread::spawn(move || {
-    topwoman::run(rx);
-  });
-
-  while !finished.get() {
-    event_queue.dispatch(&mut (), |_, _, _| { /* we ignore unfiltered messages */ }).unwrap();
-  }
+  (finished, rx, event_queue)
 }
