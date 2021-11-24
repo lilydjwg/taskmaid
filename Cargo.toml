@@ -1,0 +1,28 @@
+[package]
+name = "taskwoman"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+eyre = "*"
+atty = "*"
+color-eyre = "*"
+tracing = "*"
+byteorder = "*"
+
+[dependencies.tracing-subscriber]
+version = "*"
+features = ["env-filter"]
+
+[dependencies.wayland-client]
+version = "*"
+features = ["use_system_lib"]
+
+[dependencies.wayland-protocols]
+version = "*"
+features = ["client", "unstable_protocols"]
+
+[profile.release]
+lto = true
