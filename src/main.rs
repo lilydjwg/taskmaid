@@ -1,4 +1,5 @@
 use std::{rc::Rc, cell::{Cell, RefCell}};
+use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
 
 use wayland_client::{Display, GlobalManager, Main, global_filter};
@@ -79,43 +80,43 @@ fn run() {
   let finished = Rc::new(Cell::new(false));
   let finished2 = finished.clone();
 
-  let toplevels = Rc::new(RefCell::new(Vec::new()));
-  let toplevels2 = toplevels.clone();
+  let toplevels = Arc::new(RwLock::new(Vec::new()));
+  let toplevels2 = Arc::clone(&toplevels);
   foreign_toplevel.quick_assign(move |_, event, _| match event {
     zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
       let output_name_map3 = output_name_map.clone();
       let id = toplevel.as_ref().id();
       debug!("got a toplevel id {}", id);
-      let t = Rc::new(RefCell::new(toplevel::Toplevel::new(id)));
-      let toplevels3 = toplevels.clone();
-      toplevels2.borrow_mut().push(t.clone());
+      let t = Arc::new(RwLock::new(toplevel::Toplevel::new(id)));
+      let toplevels3 = Arc::clone(&toplevels2);
+      toplevels2.write().unwrap().push(t.clone());
 
       toplevel.quick_assign(move |_, event, _| match event {
         Event::Title { title } => {
           debug!("toplevel@{} has title {}", id, title);
-          t.borrow_mut().title = Some(title);
+          t.write().unwrap().title = Some(title);
         }
         Event::AppId { app_id } => {
           debug!("toplevel@{} has app_id {}", id, app_id);
-          t.borrow_mut().app_id = Some(app_id);
+          t.write().unwrap().app_id = Some(app_id);
         }
         Event::State { state } => {
           let state = toplevel::State::from_bytes(&state);
           debug!("toplevel@{} has state {:?}", id, state);
-          t.borrow_mut().state = state;
+          t.write().unwrap().state = state;
         }
         Event::OutputEnter { output } => {
           let output_id = output.as_ref().id();
           let borrow = output_name_map3.borrow();
           let name = borrow.get(&output_id).map(|x| x.as_ref()).unwrap_or("unknown");
           debug!("toplevel@{} entered output {}", id, name);
-          t.borrow_mut().output_name = Some(name.into());
+          t.write().unwrap().output_name = Some(name.into());
         }
         Event::Closed => {
-          debug!("{:?} has been closed", t.borrow());
-          let mut ts = toplevels3.borrow_mut();
+          debug!("{:?} has been closed", t.read().unwrap());
+          let mut ts = toplevels3.write().unwrap();
           if let Some((idx, _)) = ts.iter().enumerate()
-            .map(|(i, x)| (i, x.borrow().id))
+            .map(|(i, x)| (i, x.read().unwrap().id))
             .find(|(_, tid)| *tid == id) {
             ts.swap_remove(idx);
           }
@@ -128,6 +129,28 @@ fn run() {
       finished2.set(true);
     },
     _ => unreachable!(),
+  });
+
+  let toplevels4 = Arc::clone(&toplevels);
+  fn print_toplevels(ts: &[Arc<RwLock<toplevel::Toplevel>>]) {
+    for t in ts {
+      let t = t.read().unwrap();
+      if t.state.contains(&toplevel::State::Active) {
+        println!("Active: {:?}", t);
+      }
+      if t.state.contains(&toplevel::State::Minimized) {
+        println!("Minimized: {:?}", t);
+      }
+    }
+  }
+  std::thread::spawn(move || {
+    use std::time::Duration;
+    std::thread::sleep(Duration::from_millis(100));
+    print_toplevels(&*toplevels4.read().unwrap());
+    loop {
+      std::thread::sleep(Duration::from_secs(10));
+      print_toplevels(&*toplevels4.read().unwrap());
+    }
   });
 
   while !finished.get() {

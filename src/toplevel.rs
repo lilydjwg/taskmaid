@@ -22,7 +22,7 @@ impl Toplevel {
 use std::io::Cursor;
 use byteorder::{NativeEndian, ReadBytesExt};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum State {
   Maximized,
   Minimized,
