@@ -21,7 +21,7 @@ use tokio::io::unix::AsyncFd;
 
 mod toplevel;
 mod event;
-mod topwoman;
+mod topmaid;
 
 fn main() -> Result<()> {
   if std::env::var("RUST_LOG").is_err() {
@@ -57,7 +57,7 @@ async fn run(
   mut event_queue: EventQueue,
 ) {
   std::thread::spawn(move || {
-    topwoman::run(rx);
+    topmaid::run(rx);
   });
   let afd = AsyncFd::new(event_queue.display().get_connection_fd()).unwrap();
 

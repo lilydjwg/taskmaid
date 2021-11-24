@@ -5,15 +5,15 @@ use super::toplevel::Toplevel;
 use super::event::Event;
 
 pub fn run(rx: Receiver<Event>) {
-  let mut woman = TopWoman::new();
-  woman.run(rx);
+  let mut maid = TopMaid::new();
+  maid.run(rx);
 }
 
-struct TopWoman {
+struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
 }
 
-impl TopWoman {
+impl TopMaid {
   fn new() -> Self {
     Self {
       toplevels: HashMap::new(),
