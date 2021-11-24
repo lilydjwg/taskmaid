@@ -1,5 +1,4 @@
 use std::{rc::Rc, cell::{Cell, RefCell}};
-use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
 
 use wayland_client::{Display, GlobalManager, Main, global_filter};
@@ -18,6 +17,8 @@ use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
 
 mod toplevel;
+mod event;
+mod topwoman;
 
 fn main() -> Result<()> {
   if std::env::var("RUST_LOG").is_err() {
@@ -80,46 +81,42 @@ fn run() {
   let finished = Rc::new(Cell::new(false));
   let finished2 = finished.clone();
 
-  let toplevels = Arc::new(RwLock::new(Vec::new()));
-  let toplevels2 = Arc::clone(&toplevels);
+  let (tx, rx) = std::sync::mpsc::channel();
   foreign_toplevel.quick_assign(move |_, event, _| match event {
     zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
       let output_name_map3 = output_name_map.clone();
       let id = toplevel.as_ref().id();
       debug!("got a toplevel id {}", id);
-      let t = Arc::new(RwLock::new(toplevel::Toplevel::new(id)));
-      let toplevels3 = Arc::clone(&toplevels2);
-      toplevels2.write().unwrap().push(t.clone());
+      tx.send(event::Event::New(id)).unwrap();
 
-      toplevel.quick_assign(move |_, event, _| match event {
+      let tx = tx.clone();
+      toplevel.quick_assign(move |toplevel, event, _| match event {
         Event::Title { title } => {
           debug!("toplevel@{} has title {}", id, title);
-          t.write().unwrap().title = Some(title);
+          tx.send(event::Event::Title(id, title)).unwrap();
         }
         Event::AppId { app_id } => {
           debug!("toplevel@{} has app_id {}", id, app_id);
-          t.write().unwrap().app_id = Some(app_id);
+          tx.send(event::Event::AppId(id, app_id)).unwrap();
         }
         Event::State { state } => {
           let state = toplevel::State::from_bytes(&state);
           debug!("toplevel@{} has state {:?}", id, state);
-          t.write().unwrap().state = state;
+          if state.contains(&toplevel::State::Minimized) {
+            toplevel.unset_minimized();
+          }
+          tx.send(event::Event::State(id, state)).unwrap();
         }
         Event::OutputEnter { output } => {
           let output_id = output.as_ref().id();
           let borrow = output_name_map3.borrow();
           let name = borrow.get(&output_id).map(|x| x.as_ref()).unwrap_or("unknown");
           debug!("toplevel@{} entered output {}", id, name);
-          t.write().unwrap().output_name = Some(name.into());
+          tx.send(event::Event::OutputName(id, name.into())).unwrap();
         }
         Event::Closed => {
-          debug!("{:?} has been closed", t.read().unwrap());
-          let mut ts = toplevels3.write().unwrap();
-          if let Some((idx, _)) = ts.iter().enumerate()
-            .map(|(i, x)| (i, x.read().unwrap().id))
-            .find(|(_, tid)| *tid == id) {
-            ts.swap_remove(idx);
-          }
+          debug!("{} has been closed", id);
+          tx.send(event::Event::Closed(id)).unwrap();
         }
         _ => { }
       });
@@ -127,30 +124,13 @@ fn run() {
     zwlr_foreign_toplevel_manager_v1::Event::Finished => {
       warn!("finished?");
       finished2.set(true);
+      tx.send(event::Event::Finished).unwrap();
     },
     _ => unreachable!(),
   });
 
-  let toplevels4 = Arc::clone(&toplevels);
-  fn print_toplevels(ts: &[Arc<RwLock<toplevel::Toplevel>>]) {
-    for t in ts {
-      let t = t.read().unwrap();
-      if t.state.contains(&toplevel::State::Active) {
-        println!("Active: {:?}", t);
-      }
-      if t.state.contains(&toplevel::State::Minimized) {
-        println!("Minimized: {:?}", t);
-      }
-    }
-  }
   std::thread::spawn(move || {
-    use std::time::Duration;
-    std::thread::sleep(Duration::from_millis(100));
-    print_toplevels(&*toplevels4.read().unwrap());
-    loop {
-      std::thread::sleep(Duration::from_secs(10));
-      print_toplevels(&*toplevels4.read().unwrap());
-    }
+    topwoman::run(rx);
   });
 
   while !finished.get() {
