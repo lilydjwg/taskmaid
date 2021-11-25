@@ -1,15 +1,17 @@
-use std::sync::mpsc::Receiver;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
-use super::toplevel::Toplevel;
+use tokio::sync::mpsc::Receiver;
+
+use super::toplevel::{Toplevel, State};
 use super::event::Event;
 
-pub fn run(rx: Receiver<Event>) {
-  let mut maid = TopMaid::new();
-  maid.run(rx);
+pub async fn run(rx: Receiver<Event>) {
+  let maid = Arc::new(RwLock::new(TopMaid::new()));
+  TopMaid::run(maid, rx).await;
 }
 
-struct TopMaid {
+pub struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
 }
 
@@ -20,13 +22,9 @@ impl TopMaid {
     }
   }
 
-  fn run(&mut self, rx: Receiver<Event>) {
-    loop {
-      let event = rx.recv().unwrap();
-      if let Event::Finished = event {
-        break;
-      }
-      self.handle_event(event);
+  async fn run(maid: Arc<RwLock<Self>>, mut rx: Receiver<Event>) {
+    while let Some(event) = rx.recv().await {
+      maid.write().unwrap().handle_event(event);
     }
   }
 
@@ -58,9 +56,27 @@ impl TopMaid {
       Event::Closed(id) => {
         self.toplevels.remove(&id);
       }
-      Event::Finished => {
-        unreachable!();
-      }
     }
+  }
+
+  pub fn list(&self) -> Vec<(u32, String, String, String, Vec<u32>)> {
+    self.toplevels.values().map(|t| {
+      let st = t.state.iter().map(|st| *st as u32).collect();
+      (t.id,
+       t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+       t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+       t.output_name.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+       st,
+      )
+    }).collect()
+  }
+
+  pub fn get_active(&self) -> Option<(String, String, String)> {
+    self.toplevels.values().find(|t| t.state.contains(&State::Active))
+      .map(|t| (
+          t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          t.output_name.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+      ))
   }
 }

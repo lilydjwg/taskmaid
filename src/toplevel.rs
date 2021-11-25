@@ -22,12 +22,12 @@ impl Toplevel {
 use std::io::Cursor;
 use byteorder::{NativeEndian, ReadBytesExt};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum State {
-  Maximized,
-  Minimized,
-  Active,
-  Fullscreen,
+  Maximized = 0,
+  Minimized = 1,
+  Active = 2,
+  Fullscreen = 3,
 }
 
 impl State {
