@@ -1,6 +1,6 @@
 use std::{rc::Rc, cell::{Cell, RefCell}};
 use std::collections::HashMap;
-use tokio::sync::mpsc::{channel, Sender, Receiver, error::TrySendError};
+use tokio::sync::mpsc::{Sender, Receiver};
 
 use wayland_client::{Display, EventQueue, GlobalManager, Main, global_filter};
 use wayland_client::protocol::wl_output;
@@ -9,31 +9,59 @@ use wayland_protocols::unstable::xdg_output::v1::client::{
   zxdg_output_v1,
 };
 use wayland_protocols::wlr::unstable::foreign_toplevel::v1::client::{
-  zwlr_foreign_toplevel_handle_v1::Event,
+  zwlr_foreign_toplevel_handle_v1::{Event, ZwlrForeignToplevelHandleV1},
   zwlr_foreign_toplevel_manager_v1::{ZwlrForeignToplevelManagerV1, self},
 };
-
-use tracing::{debug, warn, error};
-
+use tracing::{debug, warn};
 use tokio::io::unix::AsyncFd;
 
 use super::toplevel;
+use super::topmaid::Action;
+use super::util::send_event;
+
+struct Toplevels {
+  toplevels: HashMap<u32, Main<ZwlrForeignToplevelHandleV1>>,
+}
+
+impl Toplevels {
+  fn new() -> Self {
+    Self {
+      toplevels: HashMap::new(),
+    }
+  }
+
+  fn close(&self, id: u32) {
+    debug!("closing {}", id);
+    if let Some(t) = self.toplevels.get(&id) {
+      t.close();
+    }
+  }
+}
 
 pub async fn run(
-  finished: Rc<Cell<bool>>,
-  mut event_queue: EventQueue,
+  toplevel_tx: Sender<toplevel::Event>,
+  mut action_rx: Receiver<Action>,
 ) {
+  let toplevels = Rc::new(RefCell::new(Toplevels::new()));
+  let (finished, mut event_queue) = setup(toplevel_tx, toplevels.clone());
   let afd = AsyncFd::new(event_queue.display().get_connection_fd()).unwrap();
 
   while !finished.get() {
     event_queue.sync_roundtrip(&mut (), |_, _, _| { /* we ignore unfiltered messages */ }).unwrap();
     debug!("waiting to read from wayland server...");
-    let mut guard = afd.readable().await.unwrap();
-    guard.clear_ready();
+    tokio::select! {
+      guard = afd.readable() => guard.unwrap().clear_ready(),
+      action = action_rx.recv() => match action.unwrap() {
+        Action::Close(id) => toplevels.borrow().close(id)
+      },
+    }
   }
 }
 
-pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
+fn setup(
+  tx: Sender<toplevel::Event>,
+  toplevels: Rc<RefCell<Toplevels>>,
+) -> (Rc<Cell<bool>>, EventQueue) {
   let display = Display::connect_to_env().unwrap();
   let mut event_queue = display.create_event_queue();
   let attached_display = (*display).clone().attach(event_queue.token());
@@ -73,9 +101,6 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
   let finished = Rc::new(Cell::new(false));
   let finished2 = finished.clone();
 
-  // keep it large since one toplevel may generate several events
-  // and we receive all of them at startup
-  let (tx, rx) = channel(10240);
   foreign_toplevel.quick_assign(move |_, event, _| match event {
     zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
       let output_name_map3 = output_name_map.clone();
@@ -84,6 +109,7 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
       send_event(&tx, toplevel::Event::New(id));
 
       let tx = tx.clone();
+      let toplevels2 = toplevels.clone();
       toplevel.quick_assign(move |toplevel, event, _| match event {
         Event::Title { title } => {
           debug!("toplevel@{} has title {}", id, title);
@@ -112,6 +138,7 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
           debug!("{} has been closed", id);
           send_event(&tx, toplevel::Event::Closed(id));
           toplevel.destroy();
+          toplevels2.borrow_mut().toplevels.remove(&id);
         }
         Event::Done => {
           debug!("{}'s info is now stable", id);
@@ -119,6 +146,8 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
         }
         _ => { }
       });
+
+      toplevels.borrow_mut().toplevels.insert(id, toplevel);
     },
     zwlr_foreign_toplevel_manager_v1::Event::Finished => {
       warn!("finished?");
@@ -127,19 +156,5 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
     _ => unreachable!(),
   });
 
-  (finished, rx, event_queue)
+  (finished, event_queue)
 }
-
-fn send_event(tx: &Sender<toplevel::Event>, e: toplevel::Event) {
-  if let Err(err) = tx.try_send(e) {
-    match err {
-      TrySendError::Full(e) => {
-        error!("too many events to process! Event discarded: {:?}", e);
-      }
-      TrySendError::Closed(_) => {
-        panic!("channel closed unexpectedly");
-      }
-    }
-  }
-}
-

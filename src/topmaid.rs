@@ -5,18 +5,21 @@ use tokio::sync::mpsc::{Sender, Receiver};
 use tracing::debug;
 
 use super::toplevel::{Toplevel, State, Event};
+use super::util::send_event;
 
 pub struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
   active_changed: bool,
   active_toplevel: u32,
-  signal_tx: Sender<Signal>,
+  dbus_tx: Sender<Signal>,
+  action_tx: Sender<Action>,
 }
 
 impl TopMaid {
-  pub fn new(signal_tx: Sender<Signal>) -> Self {
+  pub fn new(dbus_tx: Sender<Signal>, action_tx: Sender<Action>) -> Self {
     Self {
-      signal_tx,
+      dbus_tx,
+      action_tx,
       toplevels: HashMap::new(),
       active_changed: false,
       active_toplevel: 0,
@@ -74,7 +77,7 @@ impl TopMaid {
         if id == self.active_toplevel && self.active_changed {
           if let Some(a) = self.get_active() {
             debug!("active changed to {:?}", a);
-            let _ = self.signal_tx.send(Signal::ActiveChanged(a)).await;
+            let _ = self.dbus_tx.send(Signal::ActiveChanged(a)).await;
           }
           self.active_changed = false;
         }
@@ -97,6 +100,11 @@ impl TopMaid {
   pub fn get_active(&self) -> Option<ActiveInfo> {
     self.toplevels.get(&self.active_toplevel).map(ActiveInfo::from_toplevel)
   }
+
+  pub fn close_active(&self) {
+    debug!("closing active toplevel ({})", self.active_toplevel);
+    send_event(&self.action_tx, Action::Close(self.active_toplevel));
+  }
 }
 
 #[derive(Debug)]
@@ -118,4 +126,9 @@ impl ActiveInfo {
 
 pub enum Signal {
   ActiveChanged(ActiveInfo),
+}
+
+#[derive(Debug)]
+pub enum Action {
+  Close(u32),
 }

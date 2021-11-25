@@ -35,6 +35,10 @@ pub async fn dbus_run(
     b.method("List", (), ("reply",), move |_, maid, _: ()| {
       Ok((maid.read().unwrap().list(),))
     });
+    b.method("CloseActive", (), (), move |_, maid, _: ()| {
+      maid.read().unwrap().close_active();
+      Ok(())
+    });
     active_changed = Some(cb);
   });
   cr.lock().unwrap().insert("/taskmaid", &[token], maid);

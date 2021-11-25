@@ -1,3 +1,5 @@
+#![feature(async_closure)]
+
 use std::sync::{Arc, RwLock};
 
 use eyre::Result;
@@ -9,6 +11,7 @@ mod toplevel;
 mod topmaid;
 mod dbus;
 mod wayland;
+mod util;
 
 use topmaid::TopMaid;
 
@@ -29,18 +32,23 @@ fn main() -> Result<()> {
     fmt.init();
   }
 
-  let (sig_tx, sig_rx) = channel(10);
-  let (finished, rx, event_queue) = wayland::setup();
-  let fu1 = wayland::run(finished, event_queue);
-  let maid = Arc::new(RwLock::new(TopMaid::new(sig_tx)));
-  let fu2 = TopMaid::run(Arc::clone(&maid), rx);
-  let fu3 = dbus::dbus_run(maid, sig_rx);
-  let fu = future::join(future::join(fu1, fu2), fu3);
+  // keep it large since one toplevel may generate several events
+  // and we receive all of them at startup
+  let (toplevel_tx, toplevel_rx) = channel(10240);
+  let (action_tx, action_rx) = channel(10);
+  let (dbus_tx, dbus_rx) = channel(10);
+  let fu1 = wayland::run(toplevel_tx, action_rx);
+  let maid = Arc::new(RwLock::new(TopMaid::new(dbus_tx, action_tx)));
+  let fu2 = TopMaid::run(Arc::clone(&maid), toplevel_rx);
+  let fu3 = dbus::dbus_run(maid, dbus_rx);
 
+  let fu = async || {
+    let _ = future::join(future::join(fu1, fu2), fu3).await;
+  };
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()
     .unwrap();
-  rt.block_on(fu);
+  rt.block_on(fu());
   Ok(())
 }

@@ -32,7 +32,7 @@ features = ["client", "unstable_protocols"]
 
 [dependencies.tokio]
 version = "*"
-features = ["net", "rt", "sync"]
+features = ["net", "rt", "sync", "macros"]
 
 [profile.release]
 lto = true
