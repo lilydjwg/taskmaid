@@ -6,7 +6,7 @@ use dbus::message::MatchRule;
 use dbus_crossroads::{MethodErr, Crossroads, IfaceBuilder};
 use eyre::Result;
 use tokio::sync::mpsc::Receiver;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::topmaid::{TopMaid, Signal};
 
@@ -53,6 +53,7 @@ pub async fn dbus_run(
   while let Some(sig) = rx.recv().await {
     match sig {
       Signal::ActiveChanged(a) => {
+        debug!("active toplevel changed to {:?}", a);
         if let Some(f) = &active_changed {
           if let Some(msg) = f(&"/taskmaid".into(), &(a.title, a.app_id, a.output_name)) {
             if let Err(()) = c.send(msg) {

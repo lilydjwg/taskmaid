@@ -10,9 +10,10 @@ use super::util::send_event;
 pub struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
   active_changed: bool,
-  active_toplevel: u32,
+  last_active_toplevel: u32,
   dbus_tx: Sender<Signal>,
   action_tx: Sender<Action>,
+  no_active: bool,
 }
 
 impl TopMaid {
@@ -22,7 +23,8 @@ impl TopMaid {
       action_tx,
       toplevels: HashMap::new(),
       active_changed: false,
-      active_toplevel: 0,
+      last_active_toplevel: 0,
+      no_active: true,
     }
   }
 
@@ -41,7 +43,7 @@ impl TopMaid {
         if let Some(t) = self.toplevels.get_mut(&id) {
           t.title = Some(title);
         }
-        if id == self.active_toplevel {
+        if id == self.last_active_toplevel {
           self.active_changed = true;
         }
       }
@@ -49,7 +51,7 @@ impl TopMaid {
         if let Some(t) = self.toplevels.get_mut(&id) {
           t.app_id = Some(app_id);
         }
-        if id == self.active_toplevel {
+        if id == self.last_active_toplevel {
           self.active_changed = true;
         }
       }
@@ -57,13 +59,17 @@ impl TopMaid {
         if let Some(t) = self.toplevels.get_mut(&id) {
           t.output_name = Some(output_name);
         }
-        if id == self.active_toplevel {
+        if id == self.last_active_toplevel {
           self.active_changed = true;
         }
       }
       Event::State(id, state) => {
         if state.contains(&State::Active) {
-          self.active_toplevel = id;
+          self.last_active_toplevel = id;
+          self.active_changed = true;
+          self.no_active = false;
+        } else if id == self.last_active_toplevel {
+          self.no_active = true;
           self.active_changed = true;
         }
         if let Some(t) = self.toplevels.get_mut(&id) {
@@ -71,10 +77,22 @@ impl TopMaid {
         }
       }
       Event::Closed(id) => {
-        self.toplevels.remove(&id);
+        if let Some(t) = self.toplevels.remove(&id) {
+          if id == self.last_active_toplevel {
+            debug!("active toplevel closed");
+            self.no_active = true;
+            let a = ActiveInfo {
+              title: String::new(),
+              app_id: String::new(),
+              output_name: t.output_name.unwrap_or_default(),
+            };
+            let _ = self.dbus_tx.send(Signal::ActiveChanged(a)).await;
+            self.active_changed = false;
+          }
+        }
       }
       Event::Done(id) => {
-        if id == self.active_toplevel && self.active_changed {
+        if id == self.last_active_toplevel && self.active_changed {
           if let Some(a) = self.get_active() {
             debug!("active changed to {:?}", a);
             let _ = self.dbus_tx.send(Signal::ActiveChanged(a)).await;
@@ -98,12 +116,23 @@ impl TopMaid {
   }
 
   pub fn get_active(&self) -> Option<ActiveInfo> {
-    self.toplevels.get(&self.active_toplevel).map(ActiveInfo::from_toplevel)
+    self.toplevels.get(&self.last_active_toplevel).map(|t| {
+      if self.no_active {
+        // signal that no active toplevel should be shown on this ouput
+        ActiveInfo {
+          title: String::new(),
+          app_id: String::new(),
+          output_name: t.output_name.clone().unwrap_or_default(),
+        }
+      } else {
+        ActiveInfo::from_toplevel(t)
+      }
+    })
   }
 
   pub fn close_active(&self) {
-    debug!("closing active toplevel ({})", self.active_toplevel);
-    send_event(&self.action_tx, Action::Close(self.active_toplevel));
+    debug!("closing active toplevel ({})", self.last_active_toplevel);
+    send_event(&self.action_tx, Action::Close(self.last_active_toplevel));
   }
 }
 
