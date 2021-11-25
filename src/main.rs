@@ -1,11 +1,16 @@
+use std::sync::{Arc, RwLock};
+
 use eyre::Result;
 use tracing_subscriber::EnvFilter;
+use futures::future;
 
 mod toplevel;
 mod event;
 mod topmaid;
 mod dbus;
 mod wayland;
+
+use topmaid::TopMaid;
 
 fn main() -> Result<()> {
   if std::env::var("RUST_LOG").is_err() {
@@ -25,13 +30,16 @@ fn main() -> Result<()> {
   }
 
   let (finished, rx, event_queue) = wayland::setup();
-  let fu = wayland::run(finished, event_queue);
-  let fu2 = topmaid::run(rx);
+  let fu1 = wayland::run(finished, event_queue);
+  let maid = Arc::new(RwLock::new(TopMaid::new()));
+  let fu2 = TopMaid::run(Arc::clone(&maid), rx);
+  let fu3 = dbus::dbus_run(maid);
+  let fu = future::join(future::join(fu1, fu2), fu3);
 
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()
     .unwrap();
-  rt.block_on(futures::future::join(fu, fu2));
+  rt.block_on(fu);
   Ok(())
 }

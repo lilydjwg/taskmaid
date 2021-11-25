@@ -116,7 +116,6 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
         Event::Done => {
           debug!("{}'s info is now stable", id);
           send_event(&tx, toplevel::Event::Done(id));
-          toplevel.destroy();
         }
         _ => { }
       });

@@ -6,23 +6,18 @@ use tracing::info;
 
 use super::toplevel::{Toplevel, State, Event};
 
-pub async fn run(rx: Receiver<Event>) {
-  let maid = Arc::new(RwLock::new(TopMaid::new()));
-  TopMaid::run(maid, rx).await;
-}
-
 pub struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
 }
 
 impl TopMaid {
-  fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       toplevels: HashMap::new(),
     }
   }
 
-  async fn run(maid: Arc<RwLock<Self>>, mut rx: Receiver<Event>) {
+  pub async fn run(maid: Arc<RwLock<Self>>, mut rx: Receiver<Event>) {
     while let Some(event) = rx.recv().await {
       maid.write().unwrap().handle_event(event);
     }
