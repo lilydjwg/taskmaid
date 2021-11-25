@@ -118,7 +118,7 @@ impl TopMaid {
   pub fn get_active(&self) -> Option<ActiveInfo> {
     self.toplevels.get(&self.last_active_toplevel).map(|t| {
       if self.no_active {
-        // signal that no active toplevel should be shown on this ouput
+        // signal that no active toplevel should be shown on this output
         ActiveInfo {
           title: String::new(),
           app_id: String::new(),
