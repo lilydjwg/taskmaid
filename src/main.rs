@@ -3,9 +3,9 @@ use std::sync::{Arc, RwLock};
 use eyre::Result;
 use tracing_subscriber::EnvFilter;
 use futures::future;
+use tokio::sync::mpsc::channel;
 
 mod toplevel;
-mod event;
 mod topmaid;
 mod dbus;
 mod wayland;
@@ -29,11 +29,12 @@ fn main() -> Result<()> {
     fmt.init();
   }
 
+  let (sig_tx, sig_rx) = channel(10);
   let (finished, rx, event_queue) = wayland::setup();
   let fu1 = wayland::run(finished, event_queue);
-  let maid = Arc::new(RwLock::new(TopMaid::new()));
+  let maid = Arc::new(RwLock::new(TopMaid::new(sig_tx)));
   let fu2 = TopMaid::run(Arc::clone(&maid), rx);
-  let fu3 = dbus::dbus_run(maid);
+  let fu3 = dbus::dbus_run(maid, sig_rx);
   let fu = future::join(future::join(fu1, fu2), fu3);
 
   let rt = tokio::runtime::Builder::new_current_thread()

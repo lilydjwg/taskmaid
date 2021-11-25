@@ -1,27 +1,19 @@
 use std::sync::{Arc, Mutex, RwLock};
 
-use futures::future;
 use dbus_tokio::connection;
-use dbus::channel::MatchingReceiver;
+use dbus::channel::{Sender, MatchingReceiver};
 use dbus::message::MatchRule;
-use dbus::nonblock::SyncConnection;
-use dbus_crossroads::{MethodErr, Crossroads, IfaceToken, IfaceBuilder};
+use dbus_crossroads::{MethodErr, Crossroads, IfaceBuilder};
 use eyre::Result;
+use tokio::sync::mpsc::Receiver;
+use tracing::error;
 
-use super::topmaid::TopMaid;
+use super::topmaid::{TopMaid, Signal};
 
-fn register_iface(cr: Arc<Mutex<Crossroads>>, _conn: Arc<SyncConnection>) -> IfaceToken<Arc<RwLock<TopMaid>>> {
-  cr.lock().unwrap().register("me.lilydjwg.taskmaid", |b: &mut IfaceBuilder<Arc<RwLock<TopMaid>>>| {
-    b.property("active")
-      .emits_changed_true()
-      .get(|_, maid| maid.read().unwrap().get_active().ok_or_else(||MethodErr::failed("no toplevel active")));
-    b.method("List", (), ("reply",), move |_, maid, _: ()| {
-      Ok((maid.read().unwrap().list(),))
-    });
-  })
-}
-
-pub async fn dbus_run(maid: Arc<RwLock<TopMaid>>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn dbus_run(
+  maid: Arc<RwLock<TopMaid>>,
+  mut rx: Receiver<Signal>,
+) -> Result<(), Box<dyn std::error::Error>> {
   let (resource, c) = connection::new_session_sync()?;
 
   let _handle = tokio::spawn(async {
@@ -30,7 +22,21 @@ pub async fn dbus_run(maid: Arc<RwLock<TopMaid>>) -> Result<(), Box<dyn std::err
   });
 
   let cr = Arc::new(Mutex::new(Crossroads::new()));
-  let token = register_iface(Arc::clone(&cr), c.clone());
+  let mut active_changed = None;
+  let token = cr.lock().unwrap().register(
+    "me.lilydjwg.taskmaid", |b: &mut IfaceBuilder<Arc<RwLock<TopMaid>>>| {
+    let cb = b.property("active")
+      .get(|_, maid| {
+        maid.read().unwrap().get_active()
+          .map(|a| (a.title, a.app_id, a.output_name))
+          .ok_or_else(||MethodErr::failed("no toplevel active"))
+      })
+      .changed_msg_fn();
+    b.method("List", (), ("reply",), move |_, maid, _: ()| {
+      Ok((maid.read().unwrap().list(),))
+    });
+    active_changed = Some(cb);
+  });
   cr.lock().unwrap().insert("/taskmaid", &[token], maid);
 
   c.request_name("me.lilydjwg.taskmaid", false, true, false).await?;
@@ -40,6 +46,18 @@ pub async fn dbus_run(maid: Arc<RwLock<TopMaid>>) -> Result<(), Box<dyn std::err
     true
   }));
 
-  future::pending::<()>().await;
+  while let Some(sig) = rx.recv().await {
+    match sig {
+      Signal::ActiveChanged(a) => {
+        if let Some(f) = &active_changed {
+          if let Some(msg) = f(&"/taskmaid".into(), &(a.title, a.app_id, a.output_name)) {
+            if let Err(()) = c.send(msg) {
+              error!("failed to send out D-Bus signal.");
+            }
+          }
+        }
+      }
+    };
+  }
   unreachable!()
 }
