@@ -1,0 +1,29 @@
+#!/usr/bin/python3
+
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+def handle_active(a):
+  title, app_id, output = a
+  print(title, app_id, output)
+
+def prop_changed(_iface, x, _sig):
+  if a := x.get('active'):
+    handle_active(a)
+
+def main():
+  DBusGMainLoop(set_as_default=True)
+
+  bus = dbus.SessionBus()
+  obj = bus.get_object('me.lilydjwg.taskmaid', '/taskmaid')
+  prop = dbus.Interface(obj, dbus_interface='org.freedesktop.DBus.Properties')
+  a = prop.Get('me.lilydjwg.taskmaid', 'active')
+  handle_active(a)
+  prop.connect_to_signal('PropertiesChanged', prop_changed)
+
+  loop = GLib.MainLoop()
+  loop.run()
+
+if __name__ == '__main__':
+  main()
