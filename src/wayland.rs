@@ -17,7 +17,7 @@ use tracing::{debug, warn, error};
 
 use tokio::io::unix::AsyncFd;
 
-use super::{event, toplevel};
+use super::toplevel;
 
 pub async fn run(
   finished: Rc<Cell<bool>>,
@@ -33,7 +33,7 @@ pub async fn run(
   }
 }
 
-pub fn setup() -> (Rc<Cell<bool>>, Receiver<event::Event>, EventQueue) {
+pub fn setup() -> (Rc<Cell<bool>>, Receiver<toplevel::Event>, EventQueue) {
   let display = Display::connect_to_env().unwrap();
   let mut event_queue = display.create_event_queue();
   let attached_display = (*display).clone().attach(event_queue.token());
@@ -81,17 +81,17 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<event::Event>, EventQueue) {
       let output_name_map3 = output_name_map.clone();
       let id = toplevel.as_ref().id();
       debug!("got a toplevel id {}", id);
-      send_event(&tx, event::Event::New(id));
+      send_event(&tx, toplevel::Event::New(id));
 
       let tx = tx.clone();
       toplevel.quick_assign(move |toplevel, event, _| match event {
         Event::Title { title } => {
           debug!("toplevel@{} has title {}", id, title);
-          send_event(&tx, event::Event::Title(id, title));
+          send_event(&tx, toplevel::Event::Title(id, title));
         }
         Event::AppId { app_id } => {
           debug!("toplevel@{} has app_id {}", id, app_id);
-          send_event(&tx, event::Event::AppId(id, app_id));
+          send_event(&tx, toplevel::Event::AppId(id, app_id));
         }
         Event::State { state } => {
           let state = toplevel::State::from_bytes(&state);
@@ -99,18 +99,23 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<event::Event>, EventQueue) {
           if state.contains(&toplevel::State::Minimized) {
             toplevel.unset_minimized();
           }
-          send_event(&tx, event::Event::State(id, state));
+          send_event(&tx, toplevel::Event::State(id, state));
         }
         Event::OutputEnter { output } => {
           let output_id = output.as_ref().id();
           let borrow = output_name_map3.borrow();
           let name = borrow.get(&output_id).map(|x| x.as_ref()).unwrap_or("unknown");
           debug!("toplevel@{} entered output {}", id, name);
-          send_event(&tx, event::Event::OutputName(id, name.into()));
+          send_event(&tx, toplevel::Event::OutputName(id, name.into()));
         }
         Event::Closed => {
           debug!("{} has been closed", id);
-          send_event(&tx, event::Event::Closed(id));
+          send_event(&tx, toplevel::Event::Closed(id));
+          toplevel.destroy();
+        }
+        Event::Done => {
+          debug!("{}'s info is now stable", id);
+          send_event(&tx, toplevel::Event::Done(id));
           toplevel.destroy();
         }
         _ => { }
@@ -126,7 +131,7 @@ pub fn setup() -> (Rc<Cell<bool>>, Receiver<event::Event>, EventQueue) {
   (finished, rx, event_queue)
 }
 
-fn send_event(tx: &Sender<event::Event>, e: event::Event) {
+fn send_event(tx: &Sender<toplevel::Event>, e: toplevel::Event) {
   if let Err(err) = tx.try_send(e) {
     match err {
       TrySendError::Full(e) => {

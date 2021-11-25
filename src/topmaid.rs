@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::mpsc::Receiver;
+use tracing::info;
 
-use super::toplevel::{Toplevel, State};
-use super::event::Event;
+use super::toplevel::{Toplevel, State, Event};
 
 pub async fn run(rx: Receiver<Event>) {
   let maid = Arc::new(RwLock::new(TopMaid::new()));
@@ -55,6 +55,9 @@ impl TopMaid {
       }
       Event::Closed(id) => {
         self.toplevels.remove(&id);
+      }
+      Event::Done(id) => {
+        info!("toplevel@{} done", id);
       }
     }
   }
