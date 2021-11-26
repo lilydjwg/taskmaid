@@ -63,6 +63,16 @@ impl TopMaid {
           self.active_changed = true;
         }
       }
+      Event::NewOutput(output_name) => {
+        // if we get a new output and we have toplevels belong to nowhere,
+        // let's assume they are on the new one,
+        // because we may not be fast enough to bind the new output before they enter.
+        for t in self.toplevels.values_mut() {
+          if t.output_name == Some(String::new()) {
+            t.output_name = Some(output_name.clone());
+          }
+        }
+      }
       Event::State(id, state) => {
         if state.contains(&State::Active) {
           self.last_active_toplevel = id;

@@ -57,6 +57,8 @@ pub enum Event {
   AppId(u32, String),
   State(u32, Vec<State>),
   OutputName(u32, String),
+  /// assume toplevels on unknown output are on this one
+  NewOutput(String),
   /// it's time to generate D-Bus signals
   Done(u32),
   Closed(u32),

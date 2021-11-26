@@ -2,7 +2,7 @@ use std::{rc::Rc, cell::{Cell, RefCell}};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{Sender, Receiver};
 
-use wayland_client::{Display, EventQueue, GlobalManager, Main, global_filter};
+use wayland_client::{Display, EventQueue, GlobalManager, Main, GlobalEvent, Interface};
 use wayland_client::protocol::wl_output;
 use wayland_protocols::unstable::xdg_output::v1::client::{
   zxdg_output_manager_v1,
@@ -66,30 +66,64 @@ fn setup(
   let mut event_queue = display.create_event_queue();
   let attached_display = (*display).clone().attach(event_queue.token());
 
+  // (Main<WlOutput>, global@id)
   let outputs = Rc::new(RefCell::new(Vec::new()));
   let outputs2 = outputs.clone();
+
+  // wl_output@id => zxdg_output_v1.name
+  let output_name_map = Rc::new(RefCell::new(HashMap::new()));
+  let output_name_map2 = output_name_map.clone();
+
+  let xdg_output: Rc<RefCell<Option<Main<zxdg_output_manager_v1::ZxdgOutputManagerV1>>>> = Rc::new(RefCell::new(None));
+  let xdg_output2 = xdg_output.clone();
+
+  let tx2 = tx.clone();
+
   let globals = GlobalManager::new_with_cb(
     &attached_display,
-    global_filter!(
-      [wl_output::WlOutput, 2, move |output: Main<wl_output::WlOutput>, _: DispatchData| {
-        outputs2.borrow_mut().push(output);
-      }]
-    )
+    move |event, registry, _| match event {
+      GlobalEvent::New { id, interface, version } if interface == wl_output::WlOutput::NAME => {
+        debug!("got a new output: {}", id);
+        assert!(version >= 2);
+        let output = registry.bind::<wl_output::WlOutput>(version, id);
+        let oid = output.as_ref().id();
+        if let Some(xdg_output) = &*xdg_output2.borrow() {
+          let output_name_map3 = output_name_map2.clone();
+          let tx3 = tx2.clone();
+          xdg_output.get_xdg_output(&output).quick_assign(move |_, event, _|
+            if let zxdg_output_v1::Event::Name { name } = event {
+              send_event(&tx3, toplevel::Event::NewOutput(name.clone()));
+              output_name_map3.borrow_mut().insert(oid, name);
+            }
+          );
+        }
+        outputs2.borrow_mut().push((output, id));
+      }
+      GlobalEvent::Removed { id, interface } if interface == wl_output::WlOutput::NAME => {
+        debug!("an output has been removed: {}", id);
+        let mut o2 = outputs2.borrow_mut();
+        let (idx, _) = o2.iter().enumerate().find(|(_, (_, gid))| *gid == id).unwrap();
+        let (output, _) = o2.remove(idx);
+        let oid = output.as_ref().id();
+        output.release();
+        output_name_map2.borrow_mut().remove(&oid);
+      }
+      _ => { }
+    }
   );
 
   event_queue.sync_roundtrip(&mut (), |_, _, _| unreachable!()).unwrap();
 
-  let xdg_output = globals
+  *xdg_output.borrow_mut() = Some(globals
     .instantiate_exact::<zxdg_output_manager_v1::ZxdgOutputManagerV1>(3)
-    .expect("Compositor does not support xdg_output");
+    .expect("Compositor does not support xdg_output"));
 
-  let output_name_map = Rc::new(RefCell::new(HashMap::new()));
   for output in &*outputs.borrow() {
-    let id = output.as_ref().id();
-    let output_name_map2 = output_name_map.clone();
-    xdg_output.get_xdg_output(output).quick_assign(move |_, event, _|
+    let id = output.0.as_ref().id();
+    let output_name_map4 = output_name_map.clone();
+    xdg_output.borrow().as_ref().unwrap().get_xdg_output(&*output.0).quick_assign(move |_, event, _|
       if let zxdg_output_v1::Event::Name { name } = event {
-        output_name_map2.borrow_mut().insert(id, name);
+        output_name_map4.borrow_mut().insert(id, name);
       }
     );
   }
@@ -103,7 +137,7 @@ fn setup(
 
   foreign_toplevel.quick_assign(move |_, event, _| match event {
     zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
-      let output_name_map3 = output_name_map.clone();
+      let output_name_map5 = output_name_map.clone();
       let id = toplevel.as_ref().id();
       debug!("got a toplevel id {}", id);
       send_event(&tx, toplevel::Event::New(id));
@@ -129,10 +163,16 @@ fn setup(
         }
         Event::OutputEnter { output } => {
           let output_id = output.as_ref().id();
-          let borrow = output_name_map3.borrow();
+          let borrow = output_name_map5.borrow();
           let name = borrow.get(&output_id).map(|x| x.as_ref()).unwrap_or("unknown");
           debug!("toplevel@{} entered output {}", id, name);
           send_event(&tx, toplevel::Event::OutputName(id, name.into()));
+        }
+        Event::OutputLeave { .. } => {
+          // if we have already bound to the new output, we will miss its output_leave events
+          // at least we can record that they are left.
+          debug!("toplevel@{} left output", id);
+          send_event(&tx, toplevel::Event::OutputName(id, String::new()));
         }
         Event::Closed => {
           debug!("{} has been closed", id);
