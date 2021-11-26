@@ -66,7 +66,7 @@ fn setup(
   let mut event_queue = display.create_event_queue();
   let attached_display = (*display).clone().attach(event_queue.token());
 
-  // (Main<WlOutput>, global@id)
+  // (Main<WlOutput>, wl_registry.name)
   let outputs = Rc::new(RefCell::new(Vec::new()));
   let outputs2 = outputs.clone();
 
@@ -84,8 +84,8 @@ fn setup(
     move |event, registry, _| match event {
       GlobalEvent::New { id, interface, version } if interface == wl_output::WlOutput::NAME => {
         debug!("got a new output: {}", id);
-        assert!(version >= 2);
-        let output = registry.bind::<wl_output::WlOutput>(version, id);
+        assert!(version >= 3);
+        let output = registry.bind::<wl_output::WlOutput>(3, id);
         let oid = output.as_ref().id();
         if let Some(xdg_output) = &*xdg_output2.borrow() {
           let output_name_map3 = output_name_map2.clone();
