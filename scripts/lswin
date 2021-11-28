@@ -1,0 +1,40 @@
+#!/usr/bin/python3
+
+import enum
+
+import dbus
+
+class State(enum.IntEnum):
+  Maximized = 0
+  Minimized = 1
+  Active = 2
+  Fullscreen = 3
+
+  def __str__(self):
+    return self.name
+
+def main():
+  bus = dbus.SessionBus()
+  obj = bus.get_object('me.lilydjwg.taskmaid', '/taskmaid')
+  maid = dbus.Interface(obj, dbus_interface='me.lilydjwg.taskmaid')
+  wins = []
+  for win in maid.List():
+    id, title, app_id, output, states = win
+    states = [State(x) for x in states]
+    if states:
+      states_str = ', '.join(str(x) for x in states)
+      states_str = f'[{states_str}]'
+    else:
+      states_str = ''
+    wins.append((id, title, app_id, output, states_str))
+
+  wins.sort()
+  output_width = max(len(w[3]) for w in wins)
+  app_id_width = max(len(w[2]) for w in wins)
+
+  for w in wins:
+    id, title, app_id, output, states_str = w
+    print(f'{id}  {output:{output_width}}  {app_id:{app_id_width}}  {title}  {states_str}')
+
+if __name__ == '__main__':
+  main()
