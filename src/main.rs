@@ -16,16 +16,17 @@ mod util;
 use topmaid::TopMaid;
 
 fn main() -> Result<()> {
-  if std::env::var("RUST_LOG").is_err() {
-    std::env::set_var("RUST_LOG", "warn")
-  }
-  if std::env::var("RUST_SPANTRACE").is_err() {
-    std::env::set_var("RUST_SPANTRACE", "0");
-  }
-  color_eyre::install()?;
+  // default RUST_SPANTRACE=0
+  color_eyre::config::HookBuilder::new()
+    .capture_span_trace_by_default(false)
+    .install()?;
+
+  // default RUST_LOG=warn
+  let filter = EnvFilter::try_from_default_env()
+    .unwrap_or_else(|_| EnvFilter::from("warn"));
   let fmt = tracing_subscriber::fmt::fmt()
     .with_writer(std::io::stderr)
-    .with_env_filter(EnvFilter::from_default_env());
+    .with_env_filter(filter);
   if !atty::is(atty::Stream::Stderr) {
     fmt.without_time().init();
   } else {
