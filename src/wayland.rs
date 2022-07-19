@@ -79,10 +79,10 @@ fn setup(
     &attached_display,
     move |event, registry, _| match event {
       GlobalEvent::New { id, interface, version } if interface == wl_output::WlOutput::NAME => {
-        debug!("got a new output: {}", id);
         assert!(version >= 3);
         let output = registry.bind::<wl_output::WlOutput>(3, id);
         let oid = output.as_ref().id();
+        debug!("got a new output: {}", oid);
         if let Some(xdg_output) = &*xdg_output2.borrow() {
           let tx3 = tx2.clone();
           xdg_output.get_xdg_output(&output).quick_assign(move |_, event, _|
@@ -94,12 +94,12 @@ fn setup(
         outputs2.borrow_mut().push((output, id));
       }
       GlobalEvent::Removed { id, interface } if interface == wl_output::WlOutput::NAME => {
-        debug!("an output has been removed: {}", id);
         let mut o2 = outputs2.borrow_mut();
         let (idx, _) = o2.iter().enumerate().find(|(_, (_, gid))| *gid == id).unwrap();
         let (output, _) = o2.remove(idx);
         let oid = output.as_ref().id();
         output.release();
+        debug!("an output has been removed: {}", oid);
         send_event(&tx2, toplevel::Event::OutputRemoved(oid));
       }
       _ => { }
