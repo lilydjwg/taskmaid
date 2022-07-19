@@ -51,5 +51,6 @@ fn main() -> Result<()> {
     .build()
     .unwrap();
   rt.block_on(fu());
+
   Ok(())
 }

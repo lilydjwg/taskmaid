@@ -70,10 +70,6 @@ fn setup(
   let outputs = Rc::new(RefCell::new(Vec::new()));
   let outputs2 = outputs.clone();
 
-  // wl_output@id => zxdg_output_v1.name
-  let output_name_map = Rc::new(RefCell::new(HashMap::new()));
-  let output_name_map2 = output_name_map.clone();
-
   let xdg_output: Rc<RefCell<Option<Main<zxdg_output_manager_v1::ZxdgOutputManagerV1>>>> = Rc::new(RefCell::new(None));
   let xdg_output2 = xdg_output.clone();
 
@@ -88,12 +84,10 @@ fn setup(
         let output = registry.bind::<wl_output::WlOutput>(3, id);
         let oid = output.as_ref().id();
         if let Some(xdg_output) = &*xdg_output2.borrow() {
-          let output_name_map3 = output_name_map2.clone();
           let tx3 = tx2.clone();
           xdg_output.get_xdg_output(&output).quick_assign(move |_, event, _|
             if let zxdg_output_v1::Event::Name { name } = event {
-              send_event(&tx3, toplevel::Event::NewOutput(name.clone()));
-              output_name_map3.borrow_mut().insert(oid, name);
+              send_event(&tx3, toplevel::Event::OutputNew(oid, name));
             }
           );
         }
@@ -106,7 +100,7 @@ fn setup(
         let (output, _) = o2.remove(idx);
         let oid = output.as_ref().id();
         output.release();
-        output_name_map2.borrow_mut().remove(&oid);
+        send_event(&tx2, toplevel::Event::OutputRemoved(oid));
       }
       _ => { }
     }
@@ -120,10 +114,10 @@ fn setup(
 
   for output in &*outputs.borrow() {
     let id = output.0.as_ref().id();
-    let output_name_map4 = output_name_map.clone();
-    xdg_output.borrow().as_ref().unwrap().get_xdg_output(&*output.0).quick_assign(move |_, event, _|
+    let tx4 = tx.clone();
+    xdg_output.borrow().as_ref().unwrap().get_xdg_output(&output.0).quick_assign(move |_, event, _|
       if let zxdg_output_v1::Event::Name { name } = event {
-        output_name_map4.borrow_mut().insert(id, name);
+        send_event(&tx4, toplevel::Event::OutputNew(id, name));
       }
     );
   }
@@ -137,7 +131,6 @@ fn setup(
 
   foreign_toplevel.quick_assign(move |_, event, _| match event {
     zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
-      let output_name_map5 = output_name_map.clone();
       let id = toplevel.as_ref().id();
       debug!("got a toplevel id {}", id);
       send_event(&tx, toplevel::Event::New(id));
@@ -163,16 +156,14 @@ fn setup(
         }
         Event::OutputEnter { output } => {
           let output_id = output.as_ref().id();
-          let borrow = output_name_map5.borrow();
-          let name = borrow.get(&output_id).map(|x| x.as_ref()).unwrap_or("unknown");
-          debug!("toplevel@{} entered output {}", id, name);
-          send_event(&tx, toplevel::Event::OutputName(id, name.into()));
+          debug!("toplevel@{} entered output {}", id, output_id);
+          send_event(&tx, toplevel::Event::Output(id, Some(output_id)));
         }
-        Event::OutputLeave { .. } => {
+        Event::OutputLeave { output } => {
           // if we have already bound to the new output, we will miss its output_leave events
           // at least we can record that they are left.
-          debug!("toplevel@{} left output", id);
-          send_event(&tx, toplevel::Event::OutputName(id, String::new()));
+          debug!("toplevel@{} left output {}", id, output.as_ref().id());
+          send_event(&tx, toplevel::Event::Output(id, None));
         }
         Event::Closed => {
           debug!("{} has been closed", id);

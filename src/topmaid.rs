@@ -14,6 +14,7 @@ pub struct TopMaid {
   dbus_tx: Sender<Signal>,
   action_tx: Sender<Action>,
   no_active: bool,
+  output_map: HashMap<u32, String>,
 }
 
 impl TopMaid {
@@ -25,6 +26,7 @@ impl TopMaid {
       active_changed: false,
       last_active_toplevel: 0,
       no_active: true,
+      output_map: HashMap::new(),
     }
   }
 
@@ -32,6 +34,12 @@ impl TopMaid {
     while let Some(event) = rx.recv().await {
       maid.write().unwrap().handle_event(event).await;
     }
+  }
+
+  fn output_name(&self, id: Option<u32>) -> String {
+    id.and_then(|id|
+      self.output_map.get(&id).cloned()
+    ).unwrap_or_else(|| String::from("unknown"))
   }
 
   async fn handle_event(&mut self, event: Event) {
@@ -55,22 +63,12 @@ impl TopMaid {
           self.active_changed = true;
         }
       }
-      Event::OutputName(id, output_name) => {
+      Event::Output(id, output_id) => {
         if let Some(t) = self.toplevels.get_mut(&id) {
-          t.output_name = Some(output_name);
+          t.output = output_id;
         }
         if id == self.last_active_toplevel {
           self.active_changed = true;
-        }
-      }
-      Event::NewOutput(output_name) => {
-        // if we get a new output and we have toplevels belong to nowhere,
-        // let's assume they are on the new one,
-        // because we may not be fast enough to bind the new output before they enter.
-        for t in self.toplevels.values_mut() {
-          if t.output_name == Some(String::new()) {
-            t.output_name = Some(output_name.clone());
-          }
         }
       }
       Event::State(id, state) => {
@@ -94,7 +92,7 @@ impl TopMaid {
             let a = ActiveInfo {
               title: String::new(),
               app_id: String::new(),
-              output_name: t.output_name.unwrap_or_default(),
+              output_name: self.output_name(t.output),
             };
             let _ = self.dbus_tx.send(Signal::ActiveChanged(a)).await;
             self.active_changed = false;
@@ -110,6 +108,12 @@ impl TopMaid {
           self.active_changed = false;
         }
       }
+      Event::OutputNew(id, name) => {
+        self.output_map.insert(id, name);
+      }
+      Event::OutputRemoved(id) => {
+        self.output_map.remove(&id);
+      }
     }
   }
 
@@ -119,7 +123,7 @@ impl TopMaid {
       (t.id,
        t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
        t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-       t.output_name.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+       self.output_name(t.output),
        st,
       )
     }).collect()
@@ -132,10 +136,14 @@ impl TopMaid {
         ActiveInfo {
           title: String::new(),
           app_id: String::new(),
-          output_name: t.output_name.clone().unwrap_or_default(),
+          output_name: self.output_name(t.output),
         }
       } else {
-        ActiveInfo::from_toplevel(t)
+        ActiveInfo {
+          title: t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          app_id: t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          output_name: self.output_name(t.output),
+        }
       }
     })
   }
@@ -151,16 +159,6 @@ pub struct ActiveInfo {
   pub title: String,
   pub app_id: String,
   pub output_name: String,
-}
-
-impl ActiveInfo {
-  fn from_toplevel(t: &Toplevel) -> Self {
-    Self {
-      title: t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-      app_id: t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-      output_name: t.output_name.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-    }
-  }
 }
 
 pub enum Signal {

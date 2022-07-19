@@ -3,7 +3,7 @@ pub struct Toplevel {
   pub id: u32,
   pub title: Option<String>,
   pub app_id: Option<String>,
-  pub output_name: Option<String>,
+  pub output: Option<u32>,
   pub state: Vec<State>,
 }
 
@@ -13,7 +13,7 @@ impl Toplevel {
       id,
       title: None,
       app_id: None,
-      output_name: None,
+      output: None,
       state: vec![],
     }
   }
@@ -56,10 +56,11 @@ pub enum Event {
   Title(u32, String),
   AppId(u32, String),
   State(u32, Vec<State>),
-  OutputName(u32, String),
-  /// assume toplevels on unknown output are on this one
-  NewOutput(String),
+  Output(u32, Option<u32>),
   /// it's time to generate D-Bus signals
   Done(u32),
   Closed(u32),
+  /// Associate a name with an output
+  OutputNew(u32, String),
+  OutputRemoved(u32),
 }
