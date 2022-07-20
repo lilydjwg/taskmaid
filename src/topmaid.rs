@@ -30,6 +30,7 @@ impl TopMaid {
     }
   }
 
+  #[allow(clippy::await_holding_lock)]
   pub async fn run(maid: Arc<RwLock<Self>>, mut rx: Receiver<Event>) {
     while let Some(event) = rx.recv().await {
       maid.write().unwrap().handle_event(event).await;
