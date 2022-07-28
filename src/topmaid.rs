@@ -11,6 +11,8 @@ pub struct TopMaid {
   toplevels: HashMap<u32, Toplevel>,
   active_changed: bool,
   last_active_toplevel: u32,
+  /// active toplevel just closed, we need its remaining information to show last active output
+  just_closed: Option<Toplevel>,
   dbus_tx: Sender<Signal>,
   action_tx: Sender<Action>,
   no_active: bool,
@@ -25,6 +27,7 @@ impl TopMaid {
       toplevels: HashMap::new(),
       active_changed: false,
       last_active_toplevel: 0,
+      just_closed: None,
       no_active: true,
       output_map: HashMap::new(),
     }
@@ -98,6 +101,7 @@ impl TopMaid {
             let _ = self.dbus_tx.send(Signal::ActiveChanged(a)).await;
             self.active_changed = false;
           }
+          self.just_closed = Some(t);
         }
       }
       Event::Done(id) => {
@@ -131,22 +135,32 @@ impl TopMaid {
   }
 
   pub fn get_active(&self) -> Option<ActiveInfo> {
-    self.toplevels.get(&self.last_active_toplevel).map(|t| {
-      if self.no_active {
+    if let Some(t) = self.toplevels.get(&self.last_active_toplevel) {
+      let output_name = self.output_name(t.output);
+      let r = if !self.no_active {
+        ActiveInfo {
+          title: t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          app_id: t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
+          output_name,
+        }
+      } else {
         // signal that no active toplevel should be shown on this output
         ActiveInfo {
           title: String::new(),
           app_id: String::new(),
-          output_name: self.output_name(t.output),
+          output_name,
         }
-      } else {
-        ActiveInfo {
-          title: t.title.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-          app_id: t.app_id.as_ref().map(|x| x.to_owned()).unwrap_or_default(),
-          output_name: self.output_name(t.output),
-        }
+      };
+      return Some(r);
+    }
+
+    self.just_closed.as_ref().map(|t|
+      ActiveInfo {
+        title: String::new(),
+        app_id: String::new(),
+        output_name: self.output_name(t.output),
       }
-    })
+    )
   }
 
   pub fn close_active(&self) {
