@@ -4,10 +4,6 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use wayland_client::{Display, EventQueue, GlobalManager, Main, GlobalEvent, Interface};
 use wayland_client::protocol::wl_output;
-use wayland_protocols::unstable::xdg_output::v1::client::{
-  zxdg_output_manager_v1,
-  zxdg_output_v1,
-};
 use wayland_protocols::wlr::unstable::foreign_toplevel::v1::client::{
   zwlr_foreign_toplevel_handle_v1::{Event, ZwlrForeignToplevelHandleV1},
   zwlr_foreign_toplevel_manager_v1::{ZwlrForeignToplevelManagerV1, self},
@@ -68,10 +64,6 @@ fn setup(
 
   // (Main<WlOutput>, wl_registry.name)
   let outputs = Rc::new(RefCell::new(Vec::new()));
-  let outputs2 = outputs.clone();
-
-  let xdg_output: Rc<RefCell<Option<Main<zxdg_output_manager_v1::ZxdgOutputManagerV1>>>> = Rc::new(RefCell::new(None));
-  let xdg_output2 = xdg_output.clone();
 
   let tx2 = tx.clone();
 
@@ -79,22 +71,20 @@ fn setup(
     &attached_display,
     move |event, registry, _| match event {
       GlobalEvent::New { id, interface, version } if interface == wl_output::WlOutput::NAME => {
-        assert!(version >= 3);
-        let output = registry.bind::<wl_output::WlOutput>(3, id);
+        assert!(version >= 4);
+        let output = registry.bind::<wl_output::WlOutput>(4, id);
         let oid = output.as_ref().id();
         debug!("got a new output: {}", oid);
-        if let Some(xdg_output) = &*xdg_output2.borrow() {
-          let tx3 = tx2.clone();
-          xdg_output.get_xdg_output(&output).quick_assign(move |_, event, _|
-            if let zxdg_output_v1::Event::Name { name } = event {
-              send_event(&tx3, toplevel::Event::OutputNew(oid, name));
-            }
-          );
-        }
-        outputs2.borrow_mut().push((output, id));
+        let tx3 = tx2.clone();
+        output.quick_assign(move |_, event, _|
+          if let wl_output::Event::Name { name } = event {
+            send_event(&tx3, toplevel::Event::OutputNew(oid, name));
+          }
+        );
+        outputs.borrow_mut().push((output, id));
       }
       GlobalEvent::Removed { id, interface } if interface == wl_output::WlOutput::NAME => {
-        let mut o2 = outputs2.borrow_mut();
+        let mut o2 = outputs.borrow_mut();
         let (idx, _) = o2.iter().enumerate().find(|(_, (_, gid))| *gid == id).unwrap();
         let (output, _) = o2.remove(idx);
         let oid = output.as_ref().id();
@@ -107,20 +97,6 @@ fn setup(
   );
 
   event_queue.sync_roundtrip(&mut (), |_, _, _| unreachable!()).unwrap();
-
-  *xdg_output.borrow_mut() = Some(globals
-    .instantiate_exact::<zxdg_output_manager_v1::ZxdgOutputManagerV1>(3)
-    .expect("Compositor does not support xdg_output"));
-
-  for output in &*outputs.borrow() {
-    let id = output.0.as_ref().id();
-    let tx4 = tx.clone();
-    xdg_output.borrow().as_ref().unwrap().get_xdg_output(&output.0).quick_assign(move |_, event, _|
-      if let zxdg_output_v1::Event::Name { name } = event {
-        send_event(&tx4, toplevel::Event::OutputNew(id, name));
-      }
-    );
-  }
 
   let foreign_toplevel = globals
     .instantiate_exact::<ZwlrForeignToplevelManagerV1>(3)
