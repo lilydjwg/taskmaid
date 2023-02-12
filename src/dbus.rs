@@ -18,7 +18,7 @@ pub async fn dbus_run(
 
   let _handle = tokio::spawn(async {
     let err = resource.await;
-    panic!("Lost connection to D-Bus: {}", err);
+    panic!("Lost connection to D-Bus: {err}");
   });
 
   let cr = Arc::new(Mutex::new(Crossroads::new()));

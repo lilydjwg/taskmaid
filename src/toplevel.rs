@@ -45,7 +45,7 @@ impl State {
       1 => State::Minimized,
       2 => State::Active,
       3 => State::Fullscreen,
-      _ => panic!("unknown state: {}", a),
+      _ => panic!("unknown state: {a}"),
     }
   }
 }
