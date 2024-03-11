@@ -1,6 +1,7 @@
 #![feature(async_closure)]
 
 use std::sync::{Arc, RwLock};
+use std::io::IsTerminal;
 
 use eyre::Result;
 use tracing_subscriber::EnvFilter;
@@ -16,21 +17,18 @@ mod util;
 use topmaid::TopMaid;
 
 fn main() -> Result<()> {
-  // default RUST_SPANTRACE=0
-  color_eyre::config::HookBuilder::new()
-    .capture_span_trace_by_default(false)
-    .install()?;
-
   // default RUST_LOG=warn
   let filter = EnvFilter::try_from_default_env()
     .unwrap_or_else(|_| EnvFilter::from("warn"));
+  let isatty = std::io::stderr().is_terminal();
   let fmt = tracing_subscriber::fmt::fmt()
     .with_writer(std::io::stderr)
-    .with_env_filter(filter);
-  if !atty::is(atty::Stream::Stderr) {
-    fmt.without_time().init();
-  } else {
+    .with_env_filter(filter)
+    .with_ansi(isatty);
+  if isatty {
     fmt.init();
+  } else {
+    fmt.without_time().init();
   }
 
   // keep it large since one toplevel may generate several events
