@@ -1,6 +1,6 @@
 [package]
 name = "taskmaid"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,17 +16,19 @@ dbus = "*"
 dbus-crossroads = "*"
 dbus-tokio = "*"
 
+wayland-client = "*"
+
 [dependencies.tracing-subscriber]
 version = "*"
 features = ["env-filter"]
 
-[dependencies.wayland-client]
-version = "*"
-features = ["use_system_lib"]
-
 [dependencies.wayland-protocols]
 version = "*"
-features = ["client", "unstable_protocols"]
+features = ["client"]
+
+[dependencies.wayland-protocols-wlr]
+version = "*"
+features = ["client"]
 
 [dependencies.tokio]
 version = "*"
