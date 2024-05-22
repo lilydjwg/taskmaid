@@ -50,7 +50,7 @@ pub async fn run(
 
 struct State {
   toplevels: HashMap<u32, ZwlrForeignToplevelHandleV1>,
-  outputs: Vec<wl_output::WlOutput>,
+  outputs: Vec<(u32, wl_output::WlOutput)>,
   manager: Option<ZwlrForeignToplevelManagerV1>,
   tx: Sender<toplevel::Event>,
   finished: bool,
@@ -90,7 +90,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
           debug!("got a new output: {}", name);
           assert!(version >= 4);
           let output = registry.bind::<wl_output::WlOutput, _, _>(name, 4, qh, ());
-          s.outputs.push(output);
+          s.outputs.push((name, output));
         }
         "zwlr_foreign_toplevel_manager_v1" => {
           assert!(version >= 3);
@@ -100,7 +100,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
       }
     } else if let wl_registry::Event::GlobalRemove { name } = event {
       debug!("an output has been removed: {}", name);
-      let (idx, o) = s.outputs.iter().enumerate().find(|&(_, o)| o.id().protocol_id() == name).unwrap();
+      let (idx, (_, o)) = s.outputs.iter().enumerate().find(|&(_, (oname, _))| *oname == name).unwrap();
       o.release();
       s.outputs.remove(idx);
       send_event(&s.tx, toplevel::Event::OutputRemoved(name));
