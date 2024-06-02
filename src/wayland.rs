@@ -100,10 +100,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
       }
     } else if let wl_registry::Event::GlobalRemove { name } = event {
       debug!("an output has been removed: {}", name);
-      let (idx, (_, o)) = s.outputs.iter().enumerate().find(|&(_, (oname, _))| *oname == name).unwrap();
-      o.release();
-      s.outputs.remove(idx);
-      send_event(&s.tx, toplevel::Event::OutputRemoved(name));
+      if let Some((idx, (_, o))) = s.outputs.iter().enumerate().find(|&(_, (oname, _))| *oname == name) {
+        o.release();
+        s.outputs.remove(idx);
+        send_event(&s.tx, toplevel::Event::OutputRemoved(name));
+      }
     }
   }
 }
