@@ -1,5 +1,3 @@
-#![feature(async_closure)]
-
 use std::sync::{Arc, RwLock};
 use std::io::IsTerminal;
 
