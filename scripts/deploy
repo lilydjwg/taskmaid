@@ -1,0 +1,17 @@
+#!/bin/bash -e
+
+cd "$(dirname "$0")/.."
+
+git pull --rebase
+target_dir="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)"
+bin=taskmaid
+
+cargo update
+cargo build --release
+
+install -Dsm755 "$target_dir"/release/$bin ~/bin/
+tar c ~/bin/$bin | ssh l.lilydjwg.me tar xvU -C /
+
+git add .
+git commit -m 'update deps'
+git push
