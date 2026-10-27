@@ -28,7 +28,8 @@ pub async fn run(
   let qh = event_queue.handle();
   let _registry = display.get_registry(&qh, ());
   display.sync(&qh, ());
-  let afd = AsyncFd::new(conn.as_fd()).unwrap();
+  // safety: the Wayland display is always connected
+  let afd = unsafe { AsyncFd::register(conn.as_fd()).unwrap() };
 
   while !state.finished {
     event_queue.flush().unwrap();
